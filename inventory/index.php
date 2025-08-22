@@ -8,7 +8,7 @@ requireLogin();
 // Get inventory data with product information
 $stmt = $pdo->query("
     SELECT i.*, p.name as product_name, p.sku, c.name as category_name,
-           pv.variant_name, pv.variant_value
+           pv.variant_name, pv.variant_value, p.min_stock_level, p.cost_price
     FROM inventory i
     JOIN products p ON i.product_id = p.id
     LEFT JOIN categories c ON p.category_id = c.id
@@ -21,6 +21,18 @@ $inventory = $stmt->fetchAll();
 // Get products for adding inventory
 $stmt = $pdo->query("SELECT id, name, sku FROM products WHERE active = 1 ORDER BY name");
 $products = $stmt->fetchAll();
+
+// Calculate summary statistics
+$total_products = count($inventory);
+$low_stock_count = 0;
+$total_value = 0;
+
+foreach ($inventory as $item) {
+    if ($item['quantity_available'] <= $item['min_stock_level']) {
+        $low_stock_count++;
+    }
+    $total_value += $item['quantity_on_hand'] * $item['cost_price'];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -61,7 +73,7 @@ $products = $stmt->fetchAll();
                                     <div class="col mr-2">
                                         <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
                                             Total Products</div>
-                                        <div class="h5 mb-0 font-weight-bold text-gray-800"><?php echo count($inventory); ?></div>
+                                        <div class="h5 mb-0 font-weight-bold text-gray-800"><?php echo $total_products; ?></div>
                                     </div>
                                     <div class="col-auto">
                                         <i class="fas fa-boxes fa-2x text-gray-300"></i>
@@ -78,7 +90,7 @@ $products = $stmt->fetchAll();
                                     <div class="col mr-2">
                                         <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
                                             Low Stock Items</div>
-                                        <div class="h5 mb-0 font-weight-bold text-gray-800" id="low-stock-count">0</div>
+                                        <div class="h5 mb-0 font-weight-bold text-gray-800"><?php echo $low_stock_count; ?></div>
                                     </div>
                                     <div class="col-auto">
                                         <i class="fas fa-exclamation-triangle fa-2x text-gray-300"></i>
@@ -95,7 +107,7 @@ $products = $stmt->fetchAll();
                                     <div class="col mr-2">
                                         <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
                                             Total Stock Value</div>
-                                        <div class="h5 mb-0 font-weight-bold text-gray-800">₹0</div>
+                                        <div class="h5 mb-0 font-weight-bold text-gray-800">₹<?php echo number_format($total_value, 0); ?></div>
                                     </div>
                                     <div class="col-auto">
                                         <i class="fas fa-rupee-sign fa-2x text-gray-300"></i>
@@ -163,8 +175,22 @@ $products = $stmt->fetchAll();
                                                 <td><?php echo $item['quantity_on_hand']; ?></td>
                                                 <td><?php echo $item['quantity_reserved']; ?></td>
                                                 <td>
-                                                    <span class="<?php echo $item['quantity_available'] <= 0 ? 'text-danger' : 'text-success'; ?>">
-                                                        <?php echo $item['quantity_available']; ?>
+                                                    <?php 
+                                                    $available = $item['quantity_available'];
+                                                    $min_level = $item['min_stock_level'];
+                                                    if ($available <= 0) {
+                                                        $class = 'text-danger';
+                                                        $icon = 'fas fa-exclamation-triangle';
+                                                    } elseif ($available <= $min_level) {
+                                                        $class = 'text-warning';
+                                                        $icon = 'fas fa-exclamation-circle';
+                                                    } else {
+                                                        $class = 'text-success';
+                                                        $icon = 'fas fa-check-circle';
+                                                    }
+                                                    ?>
+                                                    <span class="<?php echo $class; ?>">
+                                                        <i class="<?php echo $icon; ?>"></i> <?php echo $available; ?>
                                                     </span>
                                                 </td>
                                                 <td><?php echo htmlspecialchars($item['location']); ?></td>
@@ -194,21 +220,78 @@ $products = $stmt->fetchAll();
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="alert alert-info">
-                        <i class="fas fa-info-circle"></i> This is a demo version. In the full system, you would be able to add products with categories, variants, and initial stock levels.
-                    </div>
-                    <p>Features that will be available:</p>
-                    <ul>
-                        <li>Product name and description</li>
-                        <li>SKU generation</li>
-                        <li>Category assignment</li>
-                        <li>Variants (colors, sizes)</li>
-                        <li>Initial stock quantity</li>
-                        <li>Cost and selling prices</li>
-                    </ul>
+                    <form id="addProductForm">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">SKU *</label>
+                                    <input type="text" class="form-control" name="sku" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Product Name *</label>
+                                    <input type="text" class="form-control" name="name" required>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Category</label>
+                                    <select class="form-control" name="category_id">
+                                        <option value="">Select Category</option>
+                                        <option value="1">Shirts</option>
+                                        <option value="2">Pants</option>
+                                        <option value="3">Dresses</option>
+                                        <option value="4">Accessories</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Initial Quantity</label>
+                                    <input type="number" class="form-control" name="initial_quantity" min="0">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Cost Price (₹)</label>
+                                    <input type="number" step="0.01" class="form-control" name="cost_price">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Selling Price (₹)</label>
+                                    <input type="number" step="0.01" class="form-control" name="selling_price">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Min Stock Level</label>
+                                    <input type="number" class="form-control" name="min_stock_level" min="0">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Max Stock Level</label>
+                                    <input type="number" class="form-control" name="max_stock_level" min="0">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Description</label>
+                            <textarea class="form-control" name="description" rows="2"></textarea>
+                        </div>
+                    </form>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" form="addProductForm" class="btn btn-primary">Add Product</button>
                 </div>
             </div>
         </div>
@@ -223,27 +306,62 @@ $products = $stmt->fetchAll();
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="alert alert-info">
-                        <i class="fas fa-info-circle"></i> Stock adjustment functionality will allow you to:
-                    </div>
-                    <ul>
-                        <li>Increase or decrease stock quantities</li>
-                        <li>Record reasons for adjustments</li>
-                        <li>Track adjustment history</li>
-                        <li>Generate adjustment reports</li>
-                    </ul>
+                    <form id="stockAdjustmentForm">
+                        <div class="mb-3">
+                            <label class="form-label">Select Product *</label>
+                            <select class="form-control" name="inventory_id" required>
+                                <option value="">Choose product to adjust</option>
+                                <?php foreach ($inventory as $item): ?>
+                                    <option value="<?php echo $item['id']; ?>">
+                                        <?php echo htmlspecialchars($item['product_name']); ?>
+                                        <?php if ($item['variant_name']): ?>
+                                            (<?php echo htmlspecialchars($item['variant_name'] . ': ' . $item['variant_value']); ?>)
+                                        <?php endif; ?>
+                                        - Current: <?php echo $item['quantity_on_hand']; ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Adjustment Type *</label>
+                                    <select class="form-control" name="adjustment_type" required>
+                                        <option value="">Select Type</option>
+                                        <option value="increase">Increase Stock</option>
+                                        <option value="decrease">Decrease Stock</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Quantity *</label>
+                                    <input type="number" class="form-control" name="quantity" min="1" required>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Reason</label>
+                            <textarea class="form-control" name="reason" rows="2" placeholder="Reason for adjustment..."></textarea>
+                        </div>
+                    </form>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" form="stockAdjustmentForm" class="btn btn-success">Apply Adjustment</button>
                 </div>
             </div>
         </div>
     </div>
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="../assets/js/inventory.js"></script>
     <script>
         function adjustStock(id) {
-            alert('Stock adjustment functionality will be implemented in the full version.');
+            // Pre-select the inventory item in the modal
+            document.querySelector('select[name="inventory_id"]').value = id;
+            // Show the modal
+            new bootstrap.Modal(document.getElementById('stockAdjustmentModal')).show();
         }
     </script>
 </body>
